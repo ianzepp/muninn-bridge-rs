@@ -3,8 +3,10 @@
 //! The kernel frame is the canonical in-memory protocol. This crate converts
 //! to and from the wire frame only at explicit transport boundaries.
 
+pub mod transport;
+
 use muninn_frames::{CodecError, Frame as WireFrame, Status as WireStatus, decode_frame, encode_frame};
-use muninn_kernel::{Data, Frame as KernelFrame, Status as KernelStatus};
+use muninn_kernel::{Caller, Data, Frame as KernelFrame, PipeError, Status as KernelStatus};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
@@ -84,6 +86,22 @@ pub fn encode_from_kernel(frame: &KernelFrame) -> Vec<u8> {
     encode_frame(&wire)
 }
 
+/// Send a request through a caller and collect the full response stream.
+///
+/// This is an adapter layered on top of the stream-first kernel model. The
+/// canonical primitive remains `Caller::call`, which yields a response stream.
+///
+/// # Errors
+///
+/// Returns [`PipeError`] if the request could not be submitted to the caller.
+pub async fn collect_call(
+    caller: &Caller,
+    request: KernelFrame,
+) -> Result<Vec<KernelFrame>, PipeError> {
+    let stream = caller.call(request).await?;
+    Ok(stream.collect().await)
+}
+
 fn parse_uuid(field: &'static str, value: String) -> Result<Uuid, BridgeError> {
     Uuid::parse_str(&value).map_err(|_| BridgeError::InvalidUuid { field, value })
 }
@@ -133,6 +151,15 @@ fn kernel_status_to_wire(status: KernelStatus) -> WireStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transport::{
+        TransportError, forward_subscriber_to_bytes, recv_outbound_bytes, send_inbound_bytes,
+        send_inbound_wire,
+    };
+    use muninn_frames::Status as WireStatus;
+    use muninn_kernel::{
+        BackpressureConfig, Status as KernelStatus, StreamController, Subscriber,
+    };
+    use tokio::sync::mpsc;
 
     fn sample_wire_frame() -> WireFrame {
         WireFrame {
@@ -234,5 +261,106 @@ mod tests {
         assert_eq!(wire.id, kernel.id.to_string());
         assert_eq!(wire.call, "test:ping");
         assert_eq!(wire.status, WireStatus::Request);
+    }
+
+    #[tokio::test]
+    async fn collect_call_gathers_streamed_responses() {
+        let (mut end_a, mut end_b) = muninn_kernel::pipe(16);
+        let caller = end_a.caller();
+
+        let request = KernelFrame::request("test:stream");
+        let request_id = request.id;
+
+        let collect_task = tokio::spawn(async move { collect_call(&caller, request).await });
+
+        let received = end_b.recv().await.expect("request");
+        end_b.sender().send(received.item(Data::new())).await.expect("item");
+        end_b.sender().send(received.done()).await.expect("done");
+
+        let frames = collect_task.await.expect("join").expect("collect");
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].status, KernelStatus::Item);
+        assert_eq!(frames[0].parent_id, Some(request_id));
+        assert_eq!(frames[1].status, KernelStatus::Done);
+    }
+
+    #[tokio::test]
+    async fn send_inbound_bytes_decodes_and_submits_to_kernel() {
+        let (sender, mut rx) = mpsc::channel(1);
+
+        let wire = sample_wire_frame();
+        let bytes = encode_frame(&wire);
+        let kernel_frame = send_inbound_bytes(&bytes, &sender).await.expect("send");
+
+        let received = rx.recv().await.expect("kernel frame");
+        assert_eq!(kernel_frame.id, received.id);
+        assert_eq!(received.call, "object:create");
+    }
+
+    #[tokio::test]
+    async fn send_inbound_wire_converts_and_submits_to_kernel() {
+        let (sender, mut rx) = mpsc::channel(1);
+
+        let kernel_frame = send_inbound_wire(sample_wire_frame(), &sender)
+            .await
+            .expect("send");
+        let received = rx.recv().await.expect("kernel frame");
+
+        assert_eq!(received.id, kernel_frame.id);
+        assert_eq!(received.call, "object:create");
+    }
+
+    #[tokio::test]
+    async fn recv_outbound_bytes_encodes_subscriber_frame() {
+        let request = KernelFrame::request("test:ping");
+        let response = request.done();
+        let response_id = response.id;
+        let (tx, rx) = mpsc::channel(1);
+        let controller = StreamController::new(tx.clone(), BackpressureConfig::default());
+        let mut subscriber = Subscriber::new(rx, controller);
+        tx.send(response).await.expect("send");
+
+        let bytes = recv_outbound_bytes(&mut subscriber)
+            .await
+            .expect("recv")
+            .expect("bytes");
+        let wire = decode_frame(&bytes).expect("decode");
+
+        assert_eq!(wire.id, response_id.to_string());
+        assert_eq!(wire.status, WireStatus::Done);
+    }
+
+    #[tokio::test]
+    async fn forward_subscriber_to_bytes_pushes_to_outbound_channel() {
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(1);
+        let request = KernelFrame::request("test:ping");
+        let response = request.done();
+        let response_id = response.id;
+        let (tx, rx) = mpsc::channel(1);
+        let controller = StreamController::new(tx.clone(), BackpressureConfig::default());
+        let mut subscriber = Subscriber::new(rx, controller);
+        tx.send(response).await.expect("send");
+
+        let forwarded = forward_subscriber_to_bytes(&mut subscriber, &outbound_tx)
+            .await
+            .expect("forward")
+            .expect("frame");
+        let bytes = outbound_rx.recv().await.expect("bytes");
+        let wire = decode_frame(&bytes).expect("decode");
+
+        assert_eq!(forwarded.id, response_id);
+        assert_eq!(wire.id, response_id.to_string());
+    }
+
+    #[tokio::test]
+    async fn send_inbound_bytes_reports_closed_kernel_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+
+        let err = send_inbound_bytes(&encode_frame(&sample_wire_frame()), &tx)
+            .await
+            .expect_err("closed channel");
+
+        assert!(matches!(err, TransportError::KernelChannelClosed));
     }
 }

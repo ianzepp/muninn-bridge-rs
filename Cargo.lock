@@ -182,6 +182,7 @@ dependencies = [
  "muninn-kernel",
  "serde_json",
  "thiserror",
+ "tokio",
  "uuid",
 ]
 

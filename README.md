@@ -35,7 +35,7 @@ bridge = { package = "muninn-bridge", git = "https://github.com/ianzepp/muninn-b
 
 ## Public API
 
-The entire public surface is four functions and one error type:
+The core surface is conversion plus a small set of boundary helpers:
 
 ```rust
 pub fn wire_to_kernel(frame: muninn_frames::Frame)
@@ -45,6 +45,13 @@ pub fn kernel_to_wire(frame: muninn_kernel::Frame) -> muninn_frames::Frame;
 pub fn decode_to_kernel(bytes: &[u8])
     -> Result<muninn_kernel::Frame, BridgeError>;
 pub fn encode_from_kernel(frame: &muninn_kernel::Frame) -> Vec<u8>;
+
+pub async fn collect_call(
+    caller: &muninn_kernel::Caller,
+    request: muninn_kernel::Frame,
+) -> Result<Vec<muninn_kernel::Frame>, muninn_kernel::PipeError>;
+
+pub mod transport { ... }
 
 pub enum BridgeError {
     Codec(muninn_frames::CodecError),
@@ -116,6 +123,36 @@ let wire = muninn_frames::Frame {
 let kernel = wire_to_kernel(wire)?;
 let round_trip = kernel_to_wire(kernel);
 ```
+
+### Collecting a Response Stream
+
+`collect_call` is a convenience adapter layered over the stream-first kernel API:
+
+```rust
+use bridge::collect_call;
+
+let frames = collect_call(&caller, request).await?;
+```
+
+The primary model is still `Caller::call() -> CallStream`. `collect_call` is only for cases where the caller explicitly wants to drain the full stream into memory.
+
+### Transport Loop Helpers
+
+The `transport` module removes repetitive gateway boilerplate at byte boundaries:
+
+```rust
+use bridge::transport::{forward_subscriber_to_bytes, send_inbound_bytes};
+
+let sent = send_inbound_bytes(&incoming_bytes, &kernel_tx).await?;
+let forwarded = forward_subscriber_to_bytes(&mut subscriber, &outbound_tx).await?;
+```
+
+Included helpers:
+
+- `send_inbound_bytes` decodes bytes and submits the resulting kernel frame
+- `send_inbound_wire` converts a wire frame and submits it to the kernel
+- `recv_outbound_bytes` receives a subscriber frame and encodes it to bytes
+- `forward_subscriber_to_bytes` receives, encodes, and forwards bytes to an outbound channel
 
 ## Relationship to muninn-kernel and muninn-frames
 
