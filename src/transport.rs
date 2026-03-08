@@ -111,3 +111,7 @@ pub async fn forward_bytes(
 
     Ok(Some(frame))
 }
+
+#[cfg(test)]
+#[path = "transport_test.rs"]
+mod tests;
