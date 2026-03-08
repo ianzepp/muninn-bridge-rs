@@ -34,7 +34,7 @@ pub enum TransportError {
 ///
 /// Returns [`TransportError`] if decoding/conversion fails or if the kernel
 /// ingress channel is closed.
-pub async fn send_inbound_bytes(
+pub async fn send_bytes(
     bytes: &[u8],
     kernel_tx: &mpsc::Sender<Frame>,
 ) -> Result<Frame, TransportError> {
@@ -55,16 +55,16 @@ pub async fn send_inbound_bytes(
 ///
 /// Returns [`TransportError`] if conversion fails or if the kernel ingress
 /// channel is closed.
-pub async fn send_inbound_wire(
-    wire: WireFrame,
+pub async fn send_frame(
+    frame: WireFrame,
     kernel_tx: &mpsc::Sender<Frame>,
 ) -> Result<Frame, TransportError> {
-    let frame = wire_to_kernel(wire)?;
+    let kernel_frame = wire_to_kernel(frame)?;
     kernel_tx
-        .send(frame.clone())
+        .send(kernel_frame.clone())
         .await
         .map_err(|_| TransportError::KernelChannelClosed)?;
-    Ok(frame)
+    Ok(kernel_frame)
 }
 
 /// Receive the next outbound kernel frame from a subscriber and encode it for
@@ -76,7 +76,7 @@ pub async fn send_inbound_wire(
 ///
 /// This function is infallible with respect to encoding, but keeps a `Result`
 /// shape for symmetry with the inbound helpers and future boundary errors.
-pub async fn recv_outbound_bytes(
+pub async fn recv_bytes(
     subscriber: &mut Subscriber,
 ) -> Result<Option<Vec<u8>>, TransportError> {
     let Some(frame) = subscriber.recv().await else {
@@ -96,7 +96,7 @@ pub async fn recv_outbound_bytes(
 ///
 /// Returns [`TransportError::OutboundChannelClosed`] if the outbound byte
 /// channel is closed before the payload can be sent.
-pub async fn forward_subscriber_to_bytes(
+pub async fn forward_bytes(
     subscriber: &mut Subscriber,
     outbound_tx: &mpsc::Sender<Vec<u8>>,
 ) -> Result<Option<Frame>, TransportError> {

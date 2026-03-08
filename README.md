@@ -141,18 +141,18 @@ The primary model is still `Caller::call() -> CallStream`. `collect_call` is onl
 The `transport` module removes repetitive gateway boilerplate at byte boundaries:
 
 ```rust
-use bridge::transport::{forward_subscriber_to_bytes, send_inbound_bytes};
+use bridge::transport::{forward_bytes, send_bytes};
 
-let sent = send_inbound_bytes(&incoming_bytes, &kernel_tx).await?;
-let forwarded = forward_subscriber_to_bytes(&mut subscriber, &outbound_tx).await?;
+let sent = send_bytes(&incoming_bytes, &kernel_tx).await?;
+let forwarded = forward_bytes(&mut subscriber, &outbound_tx).await?;
 ```
 
 Included helpers:
 
-- `send_inbound_bytes` decodes bytes and submits the resulting kernel frame
-- `send_inbound_wire` converts a wire frame and submits it to the kernel
-- `recv_outbound_bytes` receives a subscriber frame and encodes it to bytes
-- `forward_subscriber_to_bytes` receives, encodes, and forwards bytes to an outbound channel
+- `send_bytes` decodes bytes and submits the resulting kernel frame
+- `send_frame` converts a wire frame and submits it to the kernel
+- `recv_bytes` receives a subscriber frame and encodes it to bytes
+- `forward_bytes` receives, encodes, and forwards bytes to an outbound channel
 
 ## Relationship to muninn-kernel and muninn-frames
 

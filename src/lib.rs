@@ -152,8 +152,7 @@ fn kernel_status_to_wire(status: KernelStatus) -> WireStatus {
 mod tests {
     use super::*;
     use crate::transport::{
-        TransportError, forward_subscriber_to_bytes, recv_outbound_bytes, send_inbound_bytes,
-        send_inbound_wire,
+        TransportError, forward_bytes, recv_bytes, send_bytes, send_frame,
     };
     use muninn_frames::Status as WireStatus;
     use muninn_kernel::{
@@ -285,12 +284,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_inbound_bytes_decodes_and_submits_to_kernel() {
+    async fn send_bytes_decodes_and_submits_to_kernel() {
         let (sender, mut rx) = mpsc::channel(1);
 
         let wire = sample_wire_frame();
         let bytes = encode_frame(&wire);
-        let kernel_frame = send_inbound_bytes(&bytes, &sender).await.expect("send");
+        let kernel_frame = send_bytes(&bytes, &sender).await.expect("send");
 
         let received = rx.recv().await.expect("kernel frame");
         assert_eq!(kernel_frame.id, received.id);
@@ -298,10 +297,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_inbound_wire_converts_and_submits_to_kernel() {
+    async fn send_frame_converts_and_submits_to_kernel() {
         let (sender, mut rx) = mpsc::channel(1);
 
-        let kernel_frame = send_inbound_wire(sample_wire_frame(), &sender)
+        let kernel_frame = send_frame(sample_wire_frame(), &sender)
             .await
             .expect("send");
         let received = rx.recv().await.expect("kernel frame");
@@ -311,7 +310,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recv_outbound_bytes_encodes_subscriber_frame() {
+    async fn recv_bytes_encodes_subscriber_frame() {
         let request = KernelFrame::request("test:ping");
         let response = request.done();
         let response_id = response.id;
@@ -320,7 +319,7 @@ mod tests {
         let mut subscriber = Subscriber::new(rx, controller);
         tx.send(response).await.expect("send");
 
-        let bytes = recv_outbound_bytes(&mut subscriber)
+        let bytes = recv_bytes(&mut subscriber)
             .await
             .expect("recv")
             .expect("bytes");
@@ -331,7 +330,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forward_subscriber_to_bytes_pushes_to_outbound_channel() {
+    async fn forward_bytes_pushes_to_outbound_channel() {
         let (outbound_tx, mut outbound_rx) = mpsc::channel(1);
         let request = KernelFrame::request("test:ping");
         let response = request.done();
@@ -341,7 +340,7 @@ mod tests {
         let mut subscriber = Subscriber::new(rx, controller);
         tx.send(response).await.expect("send");
 
-        let forwarded = forward_subscriber_to_bytes(&mut subscriber, &outbound_tx)
+        let forwarded = forward_bytes(&mut subscriber, &outbound_tx)
             .await
             .expect("forward")
             .expect("frame");
@@ -353,11 +352,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_inbound_bytes_reports_closed_kernel_channel() {
+    async fn send_bytes_reports_closed_kernel_channel() {
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
 
-        let err = send_inbound_bytes(&encode_frame(&sample_wire_frame()), &tx)
+        let err = send_bytes(&encode_frame(&sample_wire_frame()), &tx)
             .await
             .expect_err("closed channel");
 
