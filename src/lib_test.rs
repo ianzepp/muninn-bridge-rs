@@ -1,6 +1,8 @@
 use super::*;
 use muninn_frames::Status as WireStatus;
+use muninn_kernel::Data;
 use muninn_kernel::Status as KernelStatus;
+use serde_json::{Map, Value};
 
 fn sample_wire_frame() -> WireFrame {
     WireFrame {
@@ -12,10 +14,10 @@ fn sample_wire_frame() -> WireFrame {
         call: "object:create".to_owned(),
         status: WireStatus::Request,
         trace: Some(serde_json::json!({ "room": "alpha" })),
-        data: serde_json::json!({
+        data: object(serde_json::json!({
             "name": "note",
             "x": 10,
-        }),
+        })),
     }
 }
 
@@ -50,15 +52,6 @@ fn wire_to_kernel_rejects_invalid_id() {
 }
 
 #[test]
-fn wire_to_kernel_rejects_non_object_data() {
-    let mut frame = sample_wire_frame();
-    frame.data = serde_json::json!(["not", "an", "object"]);
-
-    let err = wire_to_kernel(frame).expect_err("non-object data");
-    assert!(matches!(err, BridgeError::NonObjectData { kind: "array" }));
-}
-
-#[test]
 fn kernel_to_wire_preserves_fields() {
     let kernel = KernelFrame {
         id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").expect("uuid"),
@@ -80,7 +73,7 @@ fn kernel_to_wire_preserves_fields() {
     let wire = kernel_to_wire(kernel);
     assert_eq!(wire.id, "550e8400-e29b-41d4-a716-446655440000");
     assert_eq!(wire.status, WireStatus::Done);
-    assert_eq!(wire.data, serde_json::json!({ "name": "note", "x": 10 }));
+    assert_eq!(wire.data, object(serde_json::json!({ "name": "note", "x": 10 })));
 }
 
 #[test]
@@ -123,4 +116,11 @@ async fn collect_call_gathers_streamed_responses() {
     assert_eq!(frames[0].status, KernelStatus::Item);
     assert_eq!(frames[0].parent_id, Some(request_id));
     assert_eq!(frames[1].status, KernelStatus::Done);
+}
+
+fn object(value: Value) -> Map<String, Value> {
+    let Value::Object(map) = value else {
+        panic!("expected JSON object");
+    };
+    map
 }

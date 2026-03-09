@@ -56,7 +56,6 @@ pub mod transport { ... }
 pub enum BridgeError {
     Codec(muninn_frames::CodecError),
     InvalidUuid { field: &'static str, value: String },
-    NonObjectData { kind: &'static str },
 }
 ```
 
@@ -76,7 +75,7 @@ That makes `muninn-kernel::Frame` the canonical in-memory protocol. `muninn-fram
 The bridge is strict by default:
 
 - `id` and `parent_id` must parse as UUIDs
-- wire `data` must be a JSON object when entering the kernel
+- wire `data` is object-shaped by type and by wire decoding rules
 - `status` maps one-to-one between crates
 - `trace` is passed through unchanged
 - kernel `data` becomes a JSON object when crossing to the wire
@@ -117,7 +116,7 @@ let wire = muninn_frames::Frame {
     call: "object:create".to_owned(),
     status: muninn_frames::Status::Request,
     trace: None,
-    data: serde_json::json!({ "name": "hello" }),
+    data: serde_json::from_value(serde_json::json!({ "name": "hello" }))?,
 };
 
 let kernel = wire_to_kernel(wire)?;
@@ -173,7 +172,7 @@ socket bytes
 ## Notes
 
 - **Kernel frames stay in memory as long as possible.** This crate exists to delay serialization until it is required.
-- **Non-object wire payloads are rejected on kernel entry.** The kernel expects flat object-like data.
+- **Wire payloads are object-shaped everywhere.** The Rust wire crate rejects non-object `data` during decode, and the bridge converts object fields directly into kernel data maps.
 - **Decoding can fail at two layers.** First as protobuf (`CodecError`), then as bridge validation (`BridgeError`).
 - **No transport policy is imposed here.** WebSocket, TCP, HTTP, and file boundaries should wrap these functions rather than being built into them.
 

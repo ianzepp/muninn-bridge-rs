@@ -6,8 +6,7 @@
 pub mod transport;
 
 use muninn_frames::{CodecError, Frame as WireFrame, Status as WireStatus, decode_frame, encode_frame};
-use muninn_kernel::{Caller, Data, Frame as KernelFrame, PipeError, Status as KernelStatus};
-use serde_json::{Map, Value};
+use muninn_kernel::{Caller, Frame as KernelFrame, PipeError, Status as KernelStatus};
 use uuid::Uuid;
 
 /// Errors returned while crossing the kernel ↔ wire boundary.
@@ -21,11 +20,6 @@ pub enum BridgeError {
     InvalidUuid {
         field: &'static str,
         value: String,
-    },
-    /// The wire payload must be a JSON object when entering the kernel.
-    #[error("wire data must be a JSON object, got {kind}")]
-    NonObjectData {
-        kind: &'static str,
     },
 }
 
@@ -48,7 +42,7 @@ pub fn wire_to_kernel(frame: WireFrame) -> Result<KernelFrame, BridgeError> {
         call: frame.call,
         status: wire_status_to_kernel(frame.status),
         trace: frame.trace,
-        data: value_to_data(frame.data)?,
+        data: frame.data.into_iter().collect(),
     })
 }
 
@@ -64,7 +58,7 @@ pub fn kernel_to_wire(frame: KernelFrame) -> WireFrame {
         call: frame.call,
         status: kernel_status_to_wire(frame.status),
         trace: frame.trace,
-        data: Value::Object(Map::from_iter(frame.data)),
+        data: frame.data.into_iter().collect(),
     }
 }
 
@@ -104,26 +98,6 @@ pub async fn collect_call(
 
 fn parse_uuid(field: &'static str, value: String) -> Result<Uuid, BridgeError> {
     Uuid::parse_str(&value).map_err(|_| BridgeError::InvalidUuid { field, value })
-}
-
-fn value_to_data(value: Value) -> Result<Data, BridgeError> {
-    match value {
-        Value::Object(map) => Ok(map.into_iter().collect()),
-        other => Err(BridgeError::NonObjectData {
-            kind: value_kind(&other),
-        }),
-    }
-}
-
-fn value_kind(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "bool",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
 }
 
 fn wire_status_to_kernel(status: WireStatus) -> KernelStatus {

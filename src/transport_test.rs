@@ -3,6 +3,7 @@ use crate::BridgeError;
 use muninn_frames::{Frame as WireFrame, decode_frame, encode_frame};
 use muninn_frames::Status as WireStatus;
 use muninn_kernel::{BackpressureConfig, Frame as KernelFrame, StreamController, Subscriber};
+use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 
 fn sample_wire_frame() -> WireFrame {
@@ -15,10 +16,10 @@ fn sample_wire_frame() -> WireFrame {
         call: "object:create".to_owned(),
         status: WireStatus::Request,
         trace: Some(serde_json::json!({ "room": "alpha" })),
-        data: serde_json::json!({
+        data: object(serde_json::json!({
             "name": "note",
             "x": 10,
-        }),
+        })),
     }
 }
 
@@ -117,4 +118,11 @@ async fn send_frame_preserves_bridge_validation_errors() {
             ..
         })
     ));
+}
+
+fn object(value: Value) -> Map<String, Value> {
+    let Value::Object(map) = value else {
+        panic!("expected JSON object");
+    };
+    map
 }
