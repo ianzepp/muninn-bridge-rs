@@ -189,6 +189,7 @@ dependencies = [
 [[package]]
 name = "muninn-frames"
 version = "0.1.0"
+source = "git+https://github.com/ianzepp/muninn-frames-rs.git#21475975d94746d043edce54b3bfd5da272f79a7"
 dependencies = [
  "prost",
  "prost-types",
@@ -200,6 +201,7 @@ dependencies = [
 [[package]]
 name = "muninn-kernel"
 version = "0.1.0"
+source = "git+https://github.com/ianzepp/muninn-kernel-rs.git#c02574208631bc6376074d5331a3d0f77b440a54"
 dependencies = [
  "async-trait",
  "serde",
